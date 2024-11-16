@@ -20,6 +20,7 @@ using AutumnBox.GUI.Services;
 using AutumnBox.Leafx.ObjectManagement;
 using System.Collections.Generic;
 using System.Linq;
+using System.Windows.Input;
 
 namespace AutumnBox.GUI.ViewModels
 {

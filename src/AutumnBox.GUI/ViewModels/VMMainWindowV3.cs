@@ -34,6 +34,7 @@ namespace AutumnBox.GUI.ViewModels
 
         [AutoInject]
         IWallpaperManager wallpaperManager;
+
         public VMMainWindowV3()
         {
             RaisePropertyChangedOnUIThread = true;

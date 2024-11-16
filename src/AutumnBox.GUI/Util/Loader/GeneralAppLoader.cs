@@ -121,6 +121,7 @@ namespace AutumnBox.GUI.Util.Loader
         {
             App.Current.Dispatcher.Invoke(() =>
             {
+                leafCardManager.Add(new DeviceRemoteConnect(), 0);
                 leafCardManager.Add(new DeviceSelector(), 0);
                 leafCardManager.Add(new DeviceDash(), 0);
             });
