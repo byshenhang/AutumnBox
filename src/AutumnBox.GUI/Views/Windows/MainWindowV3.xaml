@@ -58,11 +58,12 @@
                 <!--  新增的 TabItem，可以根据需要添加更多内容  -->
                 <TabItem Header="DataPull">
                     <!--  在这里添加新的内容  -->
-                    <TextBlock
+                    <controls:DataPull Margin="0,0,0,60" />
+                    <!--<TextBlock
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         FontSize="16"
-                        Text="这是一个新的 Tab" />
+                        Text="这是一个新的 Tab" />-->
                 </TabItem>
             </TabControl>
         </DockPanel>
