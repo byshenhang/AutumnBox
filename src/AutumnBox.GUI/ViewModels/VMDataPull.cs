@@ -104,7 +104,7 @@ namespace AutumnBox.GUI.ViewModels
             return false;
         }
 
-        // 异步拉取应用程序列表
+        // 异步拉取用户安装的应用程序列表（仅包名）
         private async Task PullAppsAsync()
         {
             if (devicesManager.SelectedDevice == null)
@@ -121,83 +121,40 @@ namespace AutumnBox.GUI.ViewModels
                 // 清空现有列表
                 Applications.Clear();
 
-                // 执行 ADB 命令获取包列表
-                // 使用 'adb shell pm list packages -f' 获取包名和APK路径
-                var listPackagesResult = await executor.AdbShellAsync(device, "pm", "list", "packages", "-f");
+                // 执行 ADB 命令获取用户安装的包列表
+                // 使用 'adb shell pm list packages -3' 仅获取非系统包名
+                var listPackagesResult = await executor.AdbShellAsync(device, "pm", "list", "packages", "-3");
                 listPackagesResult.ThrowIfError();
 
-                // 使用 Output.All 获取完整输出
+                // 分割输出为每一行
                 var packageLines = listPackagesResult.Output.All
                     .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
-                // 正则表达式解析每一行
-                var packageRegex = new Regex(@"^package:(?<apkPath>[^=]+)=(?<packageName>.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+                // 正则表达式解析每一行，提取包名
+                var packageRegex = new Regex(@"^package:(?<packageName>.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
                 var packages = packageLines.Select(line =>
                 {
                     var match = packageRegex.Match(line);
                     if (match.Success)
                     {
-                        return new { ApkPath = match.Groups["apkPath"].Value, PackageName = match.Groups["packageName"].Value };
+                        return match.Groups["packageName"].Value;
                     }
                     return null;
-                }).Where(x => x != null).ToList();
+                }).Where(pkgName => !string.IsNullOrWhiteSpace(pkgName)).ToList();
 
                 if (!packages.Any())
                 {
                     // 如果没有找到任何包，结束操作
-                    MessageBox.Show("未找到任何安装的应用程序。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
-                    return;
-                }
-
-                // 执行 dumpsys 命令获取包的详细信息
-                var dumpsysResult = await executor.AdbShellAsync(device, "dumpsys", "package", "packages");
-                dumpsysResult.ThrowIfError();
-
-                var dumpsysOutput = dumpsysResult.Output.All;
-
-                // 解析 dumpsys 输出以获取应用详细信息（仅包名已足够）
-                var appInfos = new List<ApplicationInfo>();
-
-                // 使用修正后的正则表达式提取所有包块
-                var packageBlockRegex = new Regex(@"^\s*Package \[(?<packageName>[^\]]+)\]", RegexOptions.Multiline | RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-                var packageBlocks = packageBlockRegex.Matches(dumpsysOutput);
-
-                // 创建一个字典以便快速查找包块
-                var packageDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (Match match in packageBlocks)
-                {
-                    var pkgName = match.Groups["packageName"].Value;
-                    if (!packageDict.ContainsKey(pkgName))
-                    {
-                        packageDict.Add(pkgName, ""); // 不需要具体内容
-                    }
-                }
-
-                // 遍历所有包，添加到应用列表
-                foreach (var pkg in packages)
-                {
-                    if (!packageDict.ContainsKey(pkg.PackageName))
-                    {
-                        // 如果未找到，跳过
-                        continue;
-                    }
-
-                    // 过滤系统包
-                    if (IsSystemPackage(pkg.PackageName, ""))
-                    {
-                        continue;
-                    }
-
-                    appInfos.Add(new ApplicationInfo { PackageName = pkg.PackageName });
-                }
-
-                if (appInfos.Count == 0)
-                {
                     MessageBox.Show("未找到任何用户安装的应用程序。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
+
+                // 创建应用信息列表
+                var appInfos = packages.Select(pkgName => new ApplicationInfo
+                {
+                    PackageName = pkgName
+                }).ToList();
 
                 // 更新应用程序集合
                 foreach (var app in appInfos.OrderBy(a => a.PackageName))
@@ -212,6 +169,8 @@ namespace AutumnBox.GUI.ViewModels
                 // 也可以记录日志
             }
         }
+
+
 
         // 选择保存目录
         private void SelectDumpDirectory()
@@ -272,8 +231,8 @@ namespace AutumnBox.GUI.ViewModels
                 var appDataPath = $"/data/app/{packageName}-*"; // 注意：/data/app/下的目录可能以-{random}结尾
 
                 // 创建目标目录
-                var targetUserDataDir = Path.Combine(DumpDirectory, $"{packageName}_Android_data");
-                var targetAppDataDir = Path.Combine(DumpDirectory, $"{packageName}_app_data");
+                var targetUserDataDir = Path.Combine(DumpDirectory, $"{packageName}/UserData");
+                var targetAppDataDir = Path.Combine(DumpDirectory, $"{packageName}/SysData");
 
                 // 确保目标目录存在
                 if (!Directory.Exists(targetUserDataDir))
@@ -329,7 +288,7 @@ namespace AutumnBox.GUI.ViewModels
                     });
 
                     // 拉取 /data/app/ 目录
-                    var appDataListResult = await executor.AdbShellAsync(device, "ls", "/data/app/");
+                     var appDataListResult = await executor.AdbShellAsync(device, "su", "-c", "ls /data/data/");
                     if (appDataListResult.ExitCode == 0)
                     {
                         var appDirs = appDataListResult.Output.All
@@ -350,9 +309,31 @@ namespace AutumnBox.GUI.ViewModels
 
                                 var pullAppDataTask = Task.Run(async () =>
                                 {
-                                    var sourceAppDir = $"/data/app/{appDir}";
-                                    var pullResult = await executor.AdbAsync("pull", sourceAppDir, targetDir);
-                                    pullResult.ThrowIfError();
+                                    // 设置目标目录
+                                    var backupDir = "/sdcard/AppPullBackup"; // 备份目录
+                                    var targetDirOnDevice = $"/data/data/{appDir}"; // 应用数据源目录
+                                    var backupAppDir = $"{backupDir}/{appDir}"; // 目标备份路径
+
+                                    // Step 1: 使用 su 命令检查并创建 /sdcard/backup 目录
+                                    var createBackupDirCommand = $"su -c 'mkdir -p {backupDir}'";
+                                    var createDirResult = await executor.AdbShellAsync(device, "su", "-c", createBackupDirCommand);
+                                    createDirResult.ThrowIfError(); // 确保目录创建成功
+
+                                    // Step 2: 使用 su 命令将文件从 /data/data/<应用目录> 复制到 /sdcard/backup/ 中
+                                    var copyCommand = $"su -c 'cp -r {targetDirOnDevice} {backupAppDir}'";
+                                    var copyResult = await executor.AdbShellAsync(device, "su", "-c", copyCommand);
+                                    copyResult.ThrowIfError(); // 确保复制成功
+
+                                    // Step 3: 使用 adb pull 从 /sdcard/backup/ 拉取文件
+                                    var pullResult = await executor.AdbAsync("pull", backupAppDir, targetDir);
+                                    pullResult.ThrowIfError(); // 确保拉取成功
+
+                                    // Step 4: 删除设备上的备份文件
+                                    var deleteCommand = $"su -c 'rm -r {backupAppDir}'";
+                                    var deleteResult = await executor.AdbShellAsync(device, "su", "-c", deleteCommand);
+                                    deleteResult.ThrowIfError(); // 确保删除成功
+
+
                                 });
 
                                 await pullAppDataTask;
