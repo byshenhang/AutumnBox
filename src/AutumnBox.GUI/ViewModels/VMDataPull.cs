@@ -50,6 +50,18 @@ namespace AutumnBox.GUI.ViewModels
             }
         }
 
+        // 当前操作状态属性
+        private string _currentStatus = "准备就绪";
+        public string CurrentStatus
+        {
+            get => _currentStatus;
+            set
+            {
+                _currentStatus = value;
+                RaisePropertyChanged();
+            }
+        }
+
         // 拉取应用程序的命令
         public ICommand PullAppsCommand { get; }
 
@@ -230,6 +242,7 @@ namespace AutumnBox.GUI.ViewModels
         }
 
         // 异步执行Dump操作
+        // 异步执行Dump操作
         private async Task DumpApplicationAsync(object obj)
         {
             var app = (ApplicationInfo)obj;
@@ -256,8 +269,9 @@ namespace AutumnBox.GUI.ViewModels
 
             try
             {
-                // 重置 Dumped Size
+                // 重置 Dumped Size 和当前状态
                 DumpedSizeText = "已 Dump 大小: 0 MB";
+                CurrentStatus = "准备就绪";
 
                 // 确保保存目录存在
                 if (!Directory.Exists(DumpDirectory))
@@ -265,31 +279,33 @@ namespace AutumnBox.GUI.ViewModels
                     Directory.CreateDirectory(DumpDirectory);
                 }
 
+                // 定义备份目录和压缩文件路径
+                var backupDir = "/sdcard/AppPullBackup"; // 设备上的备份目录
+                var sysDataTar = $"{backupDir}/SysData.tar";
+                var userDataTar = $"{backupDir}/UserData.tar";
+
                 // 定义要拉取的路径
                 var userDataPath = $"/storage/emulated/0/Android/data/{packageName}";
-                var appDataPath = $"/data/app/{packageName}-*"; // 注意：/data/app/下的目录可能以-{random}结尾
+                var appDataPath = $"/data/data/{packageName}";
 
-                // 创建目标目录
+                // 定义目标目录
                 var targetUserDataDir = Path.Combine(DumpDirectory, $"{packageName}/UserData");
-                var targetAppDataDir = Path.Combine(DumpDirectory, $"{packageName}/SysData");
+                var targetSysDataDir = Path.Combine(DumpDirectory, $"{packageName}/SysData");
 
                 // 确保目标目录存在
                 if (!Directory.Exists(targetUserDataDir))
                 {
                     Directory.CreateDirectory(targetUserDataDir);
                 }
-                if (!Directory.Exists(targetAppDataDir))
+                if (!Directory.Exists(targetSysDataDir))
                 {
-                    Directory.CreateDirectory(targetAppDataDir);
+                    Directory.CreateDirectory(targetSysDataDir);
                 }
-
-                int totalSteps = 2; // 用户数据目录和应用数据目录
-                int currentStep = 0;
 
                 // 定义一个取消令牌源，用于取消监听任务
                 using (var cts = new CancellationTokenSource())
                 {
-                    // 启动一个任务来定期更新 DumpedSizeText
+                    // 启动一个任务来定期更新 DumpedSizeText 和 CurrentStatus
                     var monitorTask = Task.Run(async () =>
                     {
                         while (!cts.Token.IsCancellationRequested)
@@ -299,94 +315,67 @@ namespace AutumnBox.GUI.ViewModels
                             Application.Current.Dispatcher.Invoke(() =>
                             {
                                 DumpedSizeText = $"已 Dump 大小: {totalSize:F2} MB";
+                                // CurrentStatus 已在主任务中更新
                             });
                             await Task.Delay(1000, cts.Token); // 每秒更新一次
                         }
                     }, cts.Token);
 
-                    // 拉取用户数据目录
-                    var pullUserDataTask = Task.Run(async () =>
+                    // Step 1: 压缩 SysData
+                    CurrentStatus = "正在压缩 SysData...";
+                    var compressSysDataResult = await executor.AdbShellAsync(device, "su", "-c", $"tar -cf {sysDataTar} {appDataPath}");
+                    if (compressSysDataResult.ExitCode != 0)
                     {
-                        var result = await executor.AdbShellAsync(device, "ls", userDataPath);
-                        if (result.ExitCode == 0)
-                        {
-                            var pullResult = await executor.AdbAsync("pull", userDataPath, targetUserDataDir);
-                            pullResult.ThrowIfError();
-                        }
-                        else
-                        {
-                            Application.Current.Dispatcher.Invoke(() =>
-                            {
-                                MessageBox.Show($"用户数据目录不存在或无法访问: {userDataPath}", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                            });
-                        }
-                        currentStep++;
-                        // 更新 DumpedSizeText
-                        double size = GetDirectorySizeMB(DumpDirectory);
-                        DumpedSizeText = $"已 Dump 大小: {size:F2} MB";
-                    });
-
-                    // 拉取 /data/app/ 目录
-                    var appDataListResult = await executor.AdbShellAsync(device, "su", "-c", "ls /data/data/");
-                    if (appDataListResult.ExitCode == 0)
-                    {
-                        var appDirs = appDataListResult.Output.All
-                            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                            .Where(line => line.Contains(packageName))
-                            .ToList();
-
-                        if (appDirs.Any())
-                        {
-                            foreach (var appDir in appDirs)
-                            {
-                                var targetDir = Path.Combine(targetAppDataDir, Path.GetFileName(appDir));
-                                // 确保每一级目录都存在
-                                if (!Directory.Exists(targetDir))
-                                {
-                                    Directory.CreateDirectory(targetDir);
-                                }
-
-                                var pullAppDataTask = Task.Run(async () =>
-                                {
-                                    // 设置目标目录
-                                    var backupDir = "/sdcard/AppPullBackup"; // 备份目录
-                                    var targetDirOnDevice = $"/data/data/{appDir}"; // 应用数据源目录
-                                    var backupAppDir = $"{backupDir}/{appDir}"; // 目标备份路径
-
-                                    // Step 1: 使用 su 命令检查并创建 /sdcard/backup 目录
-                                    var createBackupDirCommand = $"su -c 'mkdir -p {backupDir}'";
-                                    var createDirResult = await executor.AdbShellAsync(device, "su", "-c", createBackupDirCommand);
-                                    createDirResult.ThrowIfError(); // 确保目录创建成功
-
-                                    // Step 2: 使用 su 命令将文件从 /data/data/<应用目录> 复制到 /sdcard/backup/ 中
-                                    var copyCommand = $"su -c 'cp -r {targetDirOnDevice} {backupAppDir}'";
-                                    var copyResult = await executor.AdbShellAsync(device, "su", "-c", copyCommand);
-                                    copyResult.ThrowIfError(); // 确保复制成功
-
-                                    // Step 3: 使用 adb pull 从 /sdcard/backup/ 拉取文件
-                                    var pullResult = await executor.AdbAsync("pull", backupAppDir, targetDir);
-                                    pullResult.ThrowIfError(); // 确保拉取成功
-
-                                    // Step 4: 删除设备上的备份文件
-                                    var deleteCommand = $"su -c 'rm -r {backupAppDir}'";
-                                    var deleteResult = await executor.AdbShellAsync(device, "su", "-c", deleteCommand);
-                                    deleteResult.ThrowIfError(); // 确保删除成功
-                                });
-
-                                await pullAppDataTask;
-                            }
-                        }
-                        else
-                        {
-                            MessageBox.Show($"未找到应用目录: {packageName}-*", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        }
+                        MessageBox.Show("压缩 SysData 失败: " + compressSysDataResult.Output.All);
                     }
-                    else
-                    {
-                        MessageBox.Show("无法访问 /data/app/ 目录。请确保设备已 root 或具有足够权限。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        
+                    // Step 2: 压缩 UserData   
+                    CurrentStatus = "正在压缩 UserData...";
+                    var compressUserDataResult = await executor.AdbShellAsync(device, "su", "-c", $"tar -cf {userDataTar} {userDataPath}");
+                    if (compressUserDataResult.ExitCode != 0)
+                    { 
+                        MessageBox.Show("压缩 UserData 失败: " + compressUserDataResult.Output.All);
                     }
 
-                    await pullUserDataTask;
+                    // Step 3: 拉取 SysData 压缩文件
+                    CurrentStatus = "正在拉取 SysData.tar...";
+                    var pullSysDataResult = await executor.AdbAsync("pull", sysDataTar, targetSysDataDir);
+                    if (pullSysDataResult.ExitCode != 0)
+                    {
+                        MessageBox.Show("拉取 SysData.tar 失败: " + pullSysDataResult.Output.All);
+                    }
+
+                    // Step 4: 拉取 UserData 压缩文件
+                    CurrentStatus = "正在拉取 UserData.tar...";
+                    var pullUserDataResult = await executor.AdbAsync("pull", userDataTar, targetUserDataDir);
+                    if (pullUserDataResult.ExitCode != 0)
+                    {
+                        MessageBox.Show("拉取 UserData.tar 失败: " + pullUserDataResult.Output.All);
+                    }
+
+                    // Step 5: 删除设备上的备份压缩文件
+                    CurrentStatus = "正在清理设备上的备份文件...";
+                    var deleteSysDataCommand = $"su -c 'rm {sysDataTar}'";
+                    var deleteSysDataResult = await executor.AdbShellAsync(device, "su", "-c", $"rm {sysDataTar}");
+                    if (deleteSysDataResult.ExitCode != 0)
+                    {
+                        // 仅警告，不抛出异常
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            MessageBox.Show($"警告: 无法删除设备上的 {sysDataTar}", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        });
+                    }
+
+                    var deleteUserDataCommand = $"su -c 'rm {userDataTar}'";
+                    var deleteUserDataResult = await executor.AdbShellAsync(device, "su", "-c", $"rm {userDataTar}");
+                    if (deleteUserDataResult.ExitCode != 0)
+                    {
+                        // 仅警告，不抛出异常
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            MessageBox.Show($"警告: 无法删除设备上的 {userDataTar}", "警告", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        });
+                    }
 
                     // 完成后取消监控任务
                     cts.Cancel();
@@ -402,6 +391,7 @@ namespace AutumnBox.GUI.ViewModels
                 }
 
                 // 显示完成提示
+                CurrentStatus = "Dump 完成";
                 MessageBox.Show($"Dump 完成: {packageName}", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (UnauthorizedAccessException uaEx)
@@ -420,6 +410,7 @@ namespace AutumnBox.GUI.ViewModels
             {
                 // 重置 Dumped Size 显示
                 DumpedSizeText = "已 Dump 大小: 0 MB";
+                CurrentStatus = "准备就绪";
             }
         }
 

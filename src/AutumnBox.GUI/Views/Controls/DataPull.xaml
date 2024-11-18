@@ -24,6 +24,8 @@
             <RowDefinition Height="Auto" />
             <!--  搜索框  -->
             <RowDefinition Height="Auto" />
+            <!--  当前状态显示  -->
+            <RowDefinition Height="Auto" />
             <!--  拉取按钮  -->
             <RowDefinition Height="Auto" />
             <!--  应用程序列表  -->
@@ -63,9 +65,31 @@
                 Content="选择目录" />
         </StackPanel>
 
-        <!--  拉取按钮  -->
+        <!--  搜索框  -->
         <StackPanel
             Grid.Row="2"
+            Grid.ColumnSpan="2"
+            Margin="5"
+            Orientation="Horizontal">
+            <TextBlock
+                Margin="0,0,10,0"
+                VerticalAlignment="Center"
+                Text="搜索包名：" />
+            <TextBox Width="400" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
+        </StackPanel>
+
+        <!--  当前状态显示  -->
+        <TextBlock
+            Grid.Row="4"
+            Grid.ColumnSpan="2"
+            Margin="5"
+            FontWeight="Bold"
+            Foreground="Blue"
+            Text="{Binding CurrentStatus}" />
+
+        <!--  拉取按钮  -->
+        <StackPanel
+            Grid.Row="5"
             Grid.ColumnSpan="2"
             Margin="5"
             Orientation="Horizontal">
@@ -76,24 +100,10 @@
                 Style="{StaticResource ButtonSuccess}" />
         </StackPanel>
 
-
-        <!--  搜索框  -->
-        <StackPanel
-            Grid.Row="3"
-            Grid.ColumnSpan="2"
-            Margin="5,35,0,0"
-            Orientation="Horizontal">
-            <TextBlock
-                Margin="0,0,10,0"
-                VerticalAlignment="Center"
-                Text="搜索包名：" />
-            <TextBox Width="400" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
-        </StackPanel>
         <!--  应用程序列表显示  -->
         <ListView
-            Grid.Row="4"
+            Grid.Row="6"
             Grid.ColumnSpan="2"
-            Height="320"
             Margin="5,10,0,0"
             ItemsSource="{Binding ApplicationsView}"
             SelectedItem="{Binding SelectedApplication, Mode=TwoWay}">
