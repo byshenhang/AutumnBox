@@ -14,6 +14,8 @@ using System.Collections.Generic;
 using Microsoft.WindowsAPICodePack.Dialogs;
 using System.IO;
 using System.Threading;
+using System.ComponentModel; // 新增
+using System.Windows.Data;   // 新增
 
 namespace AutumnBox.GUI.ViewModels
 {
@@ -27,6 +29,26 @@ namespace AutumnBox.GUI.ViewModels
 
         // 应用程序集合
         public ObservableCollection<ApplicationInfo> Applications { get; } = new ObservableCollection<ApplicationInfo>();
+
+        // ICollectionView 用于过滤应用程序
+        private readonly ICollectionView _applicationsView;
+        public ICollectionView ApplicationsView => _applicationsView;
+
+        // 搜索文本属性
+        private string _searchText;
+        public string SearchText
+        {
+            get => _searchText;
+            set
+            {
+                if (_searchText != value)
+                {
+                    _searchText = value;
+                    RaisePropertyChanged();
+                    _applicationsView.Refresh(); // 刷新视图以应用过滤器
+                }
+            }
+        }
 
         // 拉取应用程序的命令
         public ICommand PullAppsCommand { get; }
@@ -70,12 +92,29 @@ namespace AutumnBox.GUI.ViewModels
 
             DumpApplicationCommand = new MVVMCommand(async (obj) => await DumpApplicationAsync(obj));
 
+            // 初始化 ICollectionView 并设置过滤器
+            _applicationsView = CollectionViewSource.GetDefaultView(Applications);
+            _applicationsView.Filter = FilterApplications;
+
             // 监听设备变化以更新命令的可执行状态
             devicesManager.ConnectedDevicesChanged += (s, e) =>
             {
                 //(PullAppsCommand as MVVMCommand)?.RaiseCanExecuteChanged();
                 //(DumpApplicationCommand as MVVMCommand<ApplicationInfo>)?.RaiseCanExecuteChanged();
             };
+        }
+
+        // 过滤器方法，根据 SearchText 过滤 Applications
+        private bool FilterApplications(object obj)
+        {
+            if (obj is ApplicationInfo app)
+            {
+                if (string.IsNullOrWhiteSpace(SearchText))
+                    return true; // 如果搜索文本为空，显示所有
+
+                return app.PackageName.IndexOf(SearchText, StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            return false;
         }
 
         // 判断是否为系统包
@@ -161,6 +200,8 @@ namespace AutumnBox.GUI.ViewModels
                 {
                     Applications.Add(app);
                 }
+
+                _applicationsView.Refresh(); // 添加完毕后刷新视图
             }
             catch (Exception ex)
             {
@@ -169,8 +210,6 @@ namespace AutumnBox.GUI.ViewModels
                 // 也可以记录日志
             }
         }
-
-
 
         // 选择保存目录
         private void SelectDumpDirectory()
@@ -288,7 +327,7 @@ namespace AutumnBox.GUI.ViewModels
                     });
 
                     // 拉取 /data/app/ 目录
-                     var appDataListResult = await executor.AdbShellAsync(device, "su", "-c", "ls /data/data/");
+                    var appDataListResult = await executor.AdbShellAsync(device, "su", "-c", "ls /data/data/");
                     if (appDataListResult.ExitCode == 0)
                     {
                         var appDirs = appDataListResult.Output.All
@@ -332,8 +371,6 @@ namespace AutumnBox.GUI.ViewModels
                                     var deleteCommand = $"su -c 'rm -r {backupAppDir}'";
                                     var deleteResult = await executor.AdbShellAsync(device, "su", "-c", deleteCommand);
                                     deleteResult.ThrowIfError(); // 确保删除成功
-
-
                                 });
 
                                 await pullAppDataTask;
@@ -405,5 +442,4 @@ namespace AutumnBox.GUI.ViewModels
             }
         }
     }
-
 }

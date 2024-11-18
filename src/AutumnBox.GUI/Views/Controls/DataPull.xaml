@@ -22,9 +22,12 @@
             <RowDefinition Height="Auto" />
             <!--  选择保存目录  -->
             <RowDefinition Height="Auto" />
+            <!--  搜索框  -->
+            <RowDefinition Height="Auto" />
             <!--  拉取按钮  -->
-            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <!--  应用程序列表  -->
+            <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
@@ -73,12 +76,26 @@
                 Style="{StaticResource ButtonSuccess}" />
         </StackPanel>
 
-        <!--  应用程序列表显示  -->
-        <ListView
+
+        <!--  搜索框  -->
+        <StackPanel
             Grid.Row="3"
             Grid.ColumnSpan="2"
+            Margin="5,35,0,0"
+            Orientation="Horizontal">
+            <TextBlock
+                Margin="0,0,10,0"
+                VerticalAlignment="Center"
+                Text="搜索包名：" />
+            <TextBox Width="400" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
+        </StackPanel>
+        <!--  应用程序列表显示  -->
+        <ListView
+            Grid.Row="4"
+            Grid.ColumnSpan="2"
+            Height="320"
             Margin="5,10,0,0"
-            ItemsSource="{Binding Applications}"
+            ItemsSource="{Binding ApplicationsView}"
             SelectedItem="{Binding SelectedApplication, Mode=TwoWay}">
             <ListView.View>
                 <GridView>
